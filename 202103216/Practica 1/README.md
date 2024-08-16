@@ -387,3 +387,11 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
         ```c
         asmlinkage long sys_lastkernlogs(char __user *buffer);
         ```
+
+
+## Problemas Encontrados
+1. Es importante que el nombre de nuestra syscall sea el mismo en todos los archivos en la que agregamos ya que si no fuera el mismo habrá errores de compilación.
+
+2. No quitar las claves de firmas digitales del archivo .config ocasiona que no podamos agregar archivos nuevos y producirá errores en la compilación.
+
+3. No utilizar fakeroot ocasiona que no se puedan crear archivos (tar, ar, .deb etc.) con ficheros con permisos/propietarios de superusuario y detiene el proceso de compilación.
