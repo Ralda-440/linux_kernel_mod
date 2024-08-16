@@ -124,7 +124,7 @@ Antes de realizar Modificaciones al kernel e implementar syscalls, es importante
 ## Modificaciones al kernel de Linux
 Ya que podemos compilar nuestro kernel, ahora aprenderemos a modificarlos. Las modificaciones que se explican en esta sección serán simples. No reflejan la gran cantidad y complejidad de modificaciones que se pueden realizar. Pero serviran para introducirnos en el kernel de nuestro sistema operativo. 
 
-* ### Menaje Personalizado
+* ### Mensaje Personalizado
     Se imprimirá un mensaje personalizado que se guardara en los logs de nuestro kernel.
 
     Desde la raiz del codigo fuente abriremos el siguiente archivo 
