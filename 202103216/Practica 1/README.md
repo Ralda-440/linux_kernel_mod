@@ -391,7 +391,21 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
 
 ## Problemas Encontrados
 1. Es importante que el nombre de nuestra syscall sea el mismo en todos los archivos en la que agregamos ya que si no fuera el mismo habrá errores de compilación.
+    * Solución: siempre revisar con detenimiento si el nombre de nuestra funcion se encuentra bien escrito en todos los archivos.
 
 2. No quitar las claves de firmas digitales del archivo .config ocasiona que no podamos agregar archivos nuevos y producirá errores en la compilación.
+    * Solución: Verificar que hemos eliminar las clases de firmas digitales en el archivos **.config** o firmar digitalmente nuestro archivos de codigo. Para eliminar las claves utilizar 
 
-3. No utilizar fakeroot ocasiona que no se puedan crear archivos (tar, ar, .deb etc.) con ficheros con permisos/propietarios de superusuario y detiene el proceso de compilación.
+    ```bash
+    scripts/config --disable SYSTEM_TRUSTED_KEYS
+    scripts/config --disable SYSTEM_REVOCATION_KEYS
+    scripts/config --set-str CONFIG_SYSTEM_TRUSTED_KEYS ""
+    scripts/config --set-str CONFIG_SYSTEM_REVOCATION_KEYS ""
+    ```
+
+3. Errores en la compilación debido a que no se puedan crear archivos (tar, ar, .deb etc.) con ficheros con permisos/propietarios de superusuario.
+
+    * Solución: utilizar fakeroot para evitarlo ya que este crea un entorno donde parece que se tiene permisos de superusuario para la manipulación de ficheros.
+    ```bash
+    fakeroot make
+    ```
