@@ -418,8 +418,10 @@
 545	x32	execveat		compat_sys_execveat
 546	x32	preadv2			compat_sys_preadv64v2
 547	x32	pwritev2		compat_sys_pwritev64v2
-548 64 currenttimeseg sys_currenttimeseg
-549 64 systemuptimeseg sys_systemuptimeseg
-550 64 lastkernlogs sys_lastkernlogs
+548 64  my_encrypt      sys_my_encrypt
+549 64  my_decrypt      sys_my_decrypt
+550 64 currenttimeseg sys_currenttimeseg
+551 64 systemuptimeseg sys_systemuptimeseg
+552 64 lastkernlogs sys_lastkernlogs
 # This is the end of the legacy x32 range.  Numbers 548 and above are
 # not special and are not to be used for x32-specific syscalls.

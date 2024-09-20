@@ -69,6 +69,21 @@ Antes de realizar Modificaciones al kernel e implementar syscalls, es importante
     scripts/config --set-str CONFIG_SYSTEM_TRUSTED_KEYS ""
     scripts/config --set-str CONFIG_SYSTEM_REVOCATION_KEYS ""
     ```
+    También se pude llegar a tener problemas con BPF/BTF. Se recomienda desactivarlo usando el siguiente comando:
+
+    ```bash
+    # Desactivar las opciones relacionadas con BPF
+    scripts/config --disable CONFIG_BPF
+    scripts/config --disable CONFIG_BPF_SYSCALL
+    scripts/config --disable CONFIG_BPF_JIT
+    scripts/config --disable CONFIG_BPF_JIT_ALWAYS_ON
+    scripts/config --disable CONFIG_BPF_JIT_DEFAULT_ON
+
+    # Desactivar las opciones relacionadas con BTF y debug
+    scripts/config --disable CONFIG_PAHOLE_HAS_BTF_TAG
+    scripts/config --disable CONFIG_DEBUG_INFO_BTF
+    scripts/config --disable CONFIG_DEBUG_INFO_BTF_MODULES
+    ```
 * ### Compilar el Kernel
 
     Para compilar el kernel usaremos **fakeroot**. Utilizar **fakeroot** es necesario por que nos permite ejecutar el comando **make** en un entorno donde parece que se tiene permisos de superusuario para la manipulación de ficheros. Es necesario para permitir a este comando crear archivos (tar, ar, .deb etc.) con ficheros con permisos/propietarios de superusuario.
@@ -89,6 +104,13 @@ Antes de realizar Modificaciones al kernel e implementar syscalls, es importante
     ```bash
     echo $?
     ```
+    Si desea o requiere eliminar las configuraciones o archivos creados durante la configuración y compilación del kernel, puede usar los siguientes comandos. Tomar en cuenta que también se borrara el archivo .config que se creo anteriormente.
+
+    ```bash
+    make clean
+    make mrproper
+    ```
+
 
 * ### Instalar el Kernel
 
@@ -387,7 +409,212 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
         ```c
         asmlinkage long sys_lastkernlogs(char __user *buffer);
         ```
+* ### Syscalls: Encriptar y Desencriptar
+    El metodo que se usa para encriptar y desencriptar es por XOR, lo que hace que las 2 syscalls utilizan la misma lógica para encriptar y desencriptar, y también reciben los mismo 4 parámetros (path_input, path_output, cantidad_threads, path_key), entonces se crea una función que reciba estos 4 parámetros y solo se invoca en las definiciones de las syscalls.
 
+    ```c
+    SYSCALL_DEFINE4(my_encrypt, char __user *, path_input, char __user *, path_output, int, no_threads, char __user *, path_key) {
+        return function_syscall(path_input, path_output, no_threads, path_key);
+    }
+
+    SYSCALL_DEFINE4(my_decrypt, char __user *, path_input, char __user *, path_output, int, no_threads, char __user *, path_key) {
+        return function_syscall(path_input, path_output, no_threads, path_key);
+    }
+    ```
+    * Funcion 'function_syscall'
+        
+        Esta función es la encargada de recibir los parámetros de la syscall y encriptar o desencriptar dependiendo si el input esta o no esta encriptado. 
+
+        ```c
+        int function_syscall(char __user *path_input, char __user *path_output, int no_threads, char __user *path_key);
+        ```
+    * Implementación de la función 'function_syscall'
+
+        1. Punteros del nivel de usuario
+            
+            Los punteros que se obtienen por lo parámetros apuntan a dirección a nivel de usuario, es decir, que no se pueden utilizar a nivel de kernel. La solución para esto es obtener el tamaño de las cadenas y realizar una copia. Para obtener el tamaño se utiliza "strnlen_user", que recibe como parámetros, un puntero de nivel de usuario y el tamaño máximo que leerá si no encuentra el final de la cadena(para evitar errores). También se utilizar "copy_from_user" para crear la copia a un puntero de nivel del kernel. 
+
+            ```c
+            int max_length = 1000;
+            //Path input
+            long length = strnlen_user(path_input, max_length);
+            if (length == 0 || length > max_length) 
+            {
+                printk("Error: Invalid path_input\n");
+                return -EINVAL;
+            }
+            char *path_input_ = kmalloc(length, GFP_KERNEL);
+            if (copy_from_user(path_input_, path_input, length)) {
+                return -EFAULT;
+            }
+            ```
+        2. División de fragmentos
+
+            Debido a que hasta tiempo de ejecucion se sabe en cuantos fragmentos se dividira la entrada, se utiliza un doble puntero char **, esto para crear en tiempo de ejecucion una lista de apuntadores y cada apuntador apunta a un fragmentos. La lectura del archivo input y calculo de los fragmentos se realiza con el siguientes codigo:
+
+            ```c
+            struct file *file_input;
+            file_input = filp_open(path_input_, O_RDONLY, 0);
+            if (IS_ERR(file_input)) {
+                printk(KERN_ERR "Error opening input file\n");
+                return PTR_ERR(file_input);
+            }
+            loff_t size_file = vfs_llseek(file_input,0,SEEK_END);
+            loff_t pos = vfs_llseek(file_input, 0, SEEK_SET);
+            printk(KERN_INFO "File size: %lld\n", size_file);
+            
+            int size_fragment = size_file / no_threads;
+            int size_last_fragment = size_file % no_threads;
+
+            printk(KERN_INFO "Fragment size: %d\n", size_fragment);
+            printk(KERN_INFO "Last fragment size: %d\n", size_last_fragment+size_fragment);
+
+            char **fragments_text = kmalloc_array(no_threads, sizeof(char *), GFP_KERNEL);
+
+            if (!fragments_text) {
+                ret = -ENOMEM;
+                goto final;
+            }
+
+            for (int i = 0; i < no_threads; i++) {
+                int size = size_fragment;
+                if (i == (no_threads - 1)) {
+                    size = size_fragment + size_last_fragment;
+                }
+                fragments_text[i] = kmalloc_array(size, sizeof(char), GFP_KERNEL);
+                if (!fragments_text[i]) {
+                    ret = -ENOMEM;
+                    goto final;
+                }
+            }
+
+            for (int i = 0; i < no_threads; i++) {
+                int size = size_fragment;
+                if (i == (no_threads - 1)) {
+                    size = size_fragment + size_last_fragment;
+                }
+                kernel_read(file_input, fragments_text[i], size, &pos);
+            }
+            filp_close(file_input, NULL);
+            ```
+        3. La lectura de la key
+
+            Se hace desde el archivo donde se encuentra la llave hacia un puntero char * con el siguiente codigo:
+            
+            ```c
+            struct file *file_key;
+            file_key = filp_open(path_key_, O_RDONLY, 0);
+            if (IS_ERR(file_key)) {
+                printk(KERN_ERR "Error opening key file\n");
+                return PTR_ERR(file_key);
+            }
+            loff_t size_key = vfs_llseek(file_key,0,SEEK_END);
+            pos = vfs_llseek(file_key, 0, SEEK_SET);
+            printk(KERN_INFO "Key size: %lld\n", size_key);
+            char *key = kmalloc_array(size_key, sizeof(char), GFP_KERNEL);
+            if (!key) {
+                ret = -ENOMEM;
+                goto final;
+            }
+            kernel_read(file_key, key, size_key, &pos);
+            filp_close(file_key, NULL);
+
+            printk(KERN_INFO "File Key read\n");
+            ```
+        4. Estructura para cada hilo
+
+            Se creo una estructura con la informacion necesaria para que cada hilo pueda encriptar/desencriptar su fragmento. 
+
+            ```c
+            struct args_thread {
+                struct completion *thread_completed;
+                int no_thread;
+                char *fragment_text;
+                int size_fragment;
+                char *key;
+                int size_key;
+            };
+            ```
+            Se utiliza la estructura completion definida por el kernel, que sirve para que el hilo principal espere a los demás hilos terminen su tarea. El hilo es el encargado de enviar una señal al hilo principal a través de la estructura completion.
+
+        5. Funcion para los hilos
+
+            Con la informacion de la estructura args_thread es bastante sencillo encriptar/desencriptar. 
+            
+            ```c
+            int function_thread(void* arg) {
+                struct args_thread *args = (struct args_thread *)arg;
+                printk(KERN_INFO "Thread created %d\n", args->no_thread);
+                //**********************************************************************
+                //Encriptar fragmento por XOR con la clave
+                for (int i = 0; i < args->size_fragment; i++) {
+                    args->fragment_text[i] = args->fragment_text[i] ^ args->key[i % args->size_key];
+                }
+                //**********************************************************************
+                complete(args->thread_completed);  // Marca la tarea como completada
+                return 0;
+            }
+            ```
+
+        6. Espera del hilo principal
+
+            El hilo principal necesita esperar a lo demas hilos para escribir el encriptado/desencriptado en el archivo de salida.
+
+            Para la espera se utiliza la estructura completion.
+
+            ```c
+            for (int i = 0; i < no_threads; i++) {
+                wait_for_completion(args_threads[i]->thread_completed);
+                printk(KERN_INFO "Thread %d completed\n", i);
+            }
+            ```
+
+        7. Escribir en el archivo de salida
+
+            La escritura en el archivo es bastante simple una vez los hilos terminaron su tarea.
+
+            ```c
+            struct file *file_output;
+            file_output = filp_open(path_output_, O_WRONLY | O_CREAT, 0777);
+            if (IS_ERR(file_output)) {
+                printk(KERN_ERR "Error opening output file\n");
+                return PTR_ERR(file_output);
+            }
+            pos = vfs_llseek(file_output, 0, SEEK_SET);
+            for (int i = 0; i < no_threads; i++) {
+                kernel_write(file_output, fragments_text[i], args_threads[i]->size_fragment, &pos);
+            }
+            filp_close(file_output, NULL);
+            ```
+
+        8. Liberacion de memoria
+
+            Despues de escribir en el archivo de salida es necesario liberar toda la memoria utiliza para que pueda ser usada posteriormente por otros procesos.
+
+            ```c
+            cleanup_partial:
+                // Liberar memoria en caso de error o al finalizar
+                for (int i = 0; i < no_threads; i++) {
+                    if (args_threads[i]) {
+                        kfree(args_threads[i]->thread_completed);
+                        kfree(args_threads[i]->fragment_text);
+                        kfree(args_threads[i]);
+                    }
+                }
+                kfree(threads);
+                kfree(args_threads);
+            final:
+                kfree(path_input_);
+                kfree(path_output_);
+                kfree(path_key_);
+                for (int i = 0; i < no_threads; i++) {
+                    if (fragments_text){
+                        kfree(fragments_text[i]);
+                    }
+                }
+                kfree(fragments_text);
+                kfree(key);
+            ```
 
 ## Problemas Encontrados
 1. Es importante que el nombre de nuestra syscall sea el mismo en todos los archivos en la que agregamos ya que si no fuera el mismo habrá errores de compilación.
@@ -408,4 +635,39 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
     * Solución: utilizar fakeroot para evitarlo ya que este crea un entorno donde parece que se tiene permisos de superusuario para la manipulación de ficheros.
     ```bash
     fakeroot make
+    ```
+4. Error al intentar utilizar los apuntadores de espacio de usuario en el espacio de kernel. 
+
+    * Solución: Realizar una copia a apuntadores del espacio de kernel para manipular la información.
+    
+    ```c
+    char *path_input_ = kmalloc(length, GFP_KERNEL);
+    if (copy_from_user(path_input_, path_input, length)) {
+        return -EFAULT;
+    }
+    ```
+5. Problemas al leer y copiar los datos del archivo a la memoria. 
+
+    *Solucion: Utilizar la funcion kernel_read, ya que esta cuenta con privilegios para copiar a espacio de kernel.
+
+    ```c
+    kernel_read(file_key, key, size_key, &pos);
+    ```
+
+6. Problemas con el BPF/BTF al compilar el kernel. Se puede llevar a tener problemas al usar el archivo .config del kernel actualmente instalada. 
+
+    * Solucion: Desactivarlo usando
+
+    ```bash
+    # Desactivar las opciones relacionadas con BPF
+    scripts/config --disable CONFIG_BPF
+    scripts/config --disable CONFIG_BPF_SYSCALL
+    scripts/config --disable CONFIG_BPF_JIT
+    scripts/config --disable CONFIG_BPF_JIT_ALWAYS_ON
+    scripts/config --disable CONFIG_BPF_JIT_DEFAULT_ON
+
+    # Desactivar las opciones relacionadas con BTF y debug
+    scripts/config --disable CONFIG_PAHOLE_HAS_BTF_TAG
+    scripts/config --disable CONFIG_DEBUG_INFO_BTF
+    scripts/config --disable CONFIG_DEBUG_INFO_BTF_MODULES
     ```

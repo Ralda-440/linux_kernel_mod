@@ -1280,4 +1280,7 @@ int __sys_setsockopt(int fd, int level, int optname, char __user *optval,
 asmlinkage long sys_currenttimeseg(void);
 asmlinkage long sys_systemuptimeseg(void);
 asmlinkage long sys_lastkernlogs(char __user *buffer);
+asmlinkage long sys_my_encrypt(char __user *path_input, char __user *path_output, int no_threads, char __user *path_key);
+asmlinkage long sys_my_decrypt(char __user *path_input, char __user *path_output, int no_threads, char __user *path_key);
+
 #endif
