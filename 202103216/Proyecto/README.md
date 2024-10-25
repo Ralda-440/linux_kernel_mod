@@ -774,7 +774,7 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
     info[0] = mem_info.freeram << (PAGE_SHIFT - 10);
     ```
 9. Tipo de dato incorrecto la crear el JSON para el response de la request en la api de c. En la función para crear un objeto JSON se debe indicar que tipo de dato se espera para convertirlo. Se cometió el error de indicar que se esperaba un dato de tipo float pero el dato era Integer, entonces al momento de convertirlo hubo un error de segmento de memoria porque el dato espera es mas grande que Integer.
-    * Solución: parsear el dato Integer a double para evitar el error de segmento
+    * Solución: parsear el dato de Integer a double para evitar el error de segmento
     ```c
     json = json_pack("{s:f, s:f, s:f, s:f}", "free", ((double)_info[0])/1024,
          "used", ((double)_info[1])/1024, "cached", ((double)_info[2])/1024, "total", ((double)_info[3])/1024);
