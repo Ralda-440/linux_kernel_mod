@@ -1,0 +1,1 @@
+obj-y += use_mem.o use_swap.o fault_pages.o use_pages.o use_mem_top_procs.o
