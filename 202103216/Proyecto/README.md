@@ -615,7 +615,96 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
                 kfree(fragments_text);
                 kfree(key);
             ```
+* ### Syscalls: Uso de memoria
+    Esta syscall devuelve como esta distribuido el uso de la memoria física. Toda la información de la memoria se puede obtener utilizando la estructura **struct sysinfo** y usando 2 funciones para recuperar los datos y guardarlos en la estructura. La memoria libre, utilizada y cache se calcula de la siguiente forma:
+    ```c
+    struct sysinfo mem_info;
+    si_meminfo(&mem_info);
+    si_swapinfo(&mem_info);
+    //Memoria libre en KB
+    info[0] = mem_info.freeram << (PAGE_SHIFT - 10);
+    //Memoria usada en KB
+    unsigned long available = si_mem_available();
+    info[1] = (mem_info.totalram - available) << (PAGE_SHIFT - 10);
+    //Memoria cacheada en KB
+    info[2] = (global_node_page_state(NR_FILE_PAGES) - total_swapcache_pages() - mem_info.bufferram) << (PAGE_SHIFT - 10);
+    //Memoria total en KB
+    info[3] = mem_info.totalram << (PAGE_SHIFT - 10);
+    ```  
+* ### Syscalls: Paginas de memoria de swap usadas y libre
+    Esta llamada recupera cuenta de la memoria swap esta siendo utilizada y cuanta se encuentra libre. Toda la información se guarda en la estructura **struct sysinfo** utilizando 2 funciones para obtenerla. Se calculan de la siguiente forma:
+    ```c
+    struct sysinfo mem_info;
+    si_meminfo(&mem_info);
+    si_swapinfo(&mem_info);
+    //Swap usado en paginas
+    info[0] = mem_info.totalswap - mem_info.freeswap;
+    //Swap libre en paginas
+    info[1] = mem_info.freeswap;
+    //Swap total en paginas
+    info[2] = mem_info.totalswap;
+    ``` 
+* ### Syscalls: Cantidad de fallos de pagina
+    Es syscall recupera la cantidad de fallos de paginas menores y mayores. Se utiliza un puntero de tipo **long** para guardar el array de toda la información relacionada de la memoria virtual. Se utiliza la función **all_vm_events** para recuperarla y guardarla en el puntero. Se obtiene de la siguiente forma:
+    ```c
+    unsigned long *info = kmalloc_array(NR_VM_EVENT_ITEMS, sizeof(unsigned long), GFP_KERNEL);
+    all_vm_events(info);
+    ```
 
+    Los fallos menores se encuentran en la posicion 23 y los mayores en la posicion 24 del array.
+
+* ### Syscalls: Paginas de memoria activas e inactivas
+    Esta llamada recupera la cantidad de paginas que se encuentran en uso constante (Activas) y las que no se encuentran en uso o no se han usado en un determinado tiempo. Se utiliza la función **global_node_page_state()**, esta se encarga de recuperar varios datos relacionados con la memoria, incluyendo la memoria virtual.
+    Se recupera de la siguiente forma:
+    ```c
+    //Obtener informacion de paginas
+    unsigned long pages[NR_LRU_LISTS];
+    for (int lru = LRU_BASE; lru < NR_LRU_LISTS; lru++)
+		pages[lru] = global_node_page_state(NR_LRU_BASE + lru);
+    //Paginas Activas
+    info[0] = pages[LRU_ACTIVE_ANON] + pages[LRU_ACTIVE_FILE];
+    //Paginas Inactivas
+    info[1] = pages[LRU_INACTIVE_ANON] + pages[LRU_INACTIVE_FILE];
+    ``` 
+* ### Syscalls: Procesos que más memoria utilizan
+    Esta syscall recupera los 5 proceso que mas utilizan memoria **física**. Se recorre toda la estructura de datos que guarda todos los procesos. Se utiliza un simple algoritmo que comprueba cuales son los mayores procesos que utilizan memoria y se guardan en un array de 5 elementos. Se utiliza una estructura personalizada para guardar los 5 procesos.
+    ```c
+    struct proc_info {
+        char name[16];
+        long pid;
+        unsigned long pct_usage;
+        unsigned long mm_rss;
+    };
+
+    struct proc_info *procs_info = kmalloc_array(top_procs, sizeof(struct proc_info), GFP_KERNEL);
+    //Obtener informacion de procesos
+    struct task_struct *task;
+    unsigned long mm_rss = 0;
+    for_each_process(task){
+        if (!task->mm)
+        {
+            continue;
+        }
+        mm_rss = get_mm_rss(task->mm);
+        for (int i = 0; i < top_procs; i++)
+        {
+            if (mm_rss > procs_info[i].mm_rss)
+            {
+                //Correr hacia abajo
+                for (int j = top_procs - 1; j > i; j--)
+                {
+                    procs_info[j] = procs_info[j - 1];
+                }
+                //Insertar nuevo proceso
+                procs_info[i].pid = task->pid;
+                strncpy(procs_info[i].name, task->comm, 16);
+                procs_info[i].pct_usage = (mm_rss * 1000) / mem_info.totalram;
+                procs_info[i].mm_rss = mm_rss;
+                break;
+            }
+        }
+    }
+    ```  
 ## Problemas Encontrados
 1. Es importante que el nombre de nuestra syscall sea el mismo en todos los archivos en la que agregamos ya que si no fuera el mismo habrá errores de compilación.
     * Solución: siempre revisar con detenimiento si el nombre de nuestra funcion se encuentra bien escrito en todos los archivos.
@@ -656,7 +745,7 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
 
 6. Problemas con el BPF/BTF al compilar el kernel. Se puede llevar a tener problemas al usar el archivo .config del kernel actualmente instalada. 
 
-    * Solucion: Desactivarlo usando
+    * Solución: Desactivarlo usando
 
     ```bash
     # Desactivar las opciones relacionadas con BPF
@@ -671,3 +760,22 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
     scripts/config --disable CONFIG_DEBUG_INFO_BTF
     scripts/config --disable CONFIG_DEBUG_INFO_BTF_MODULES
     ```
+7. Problemas con los CORS en la api en c. El autor del framework recomendó configurar los CORS para cada endpoint ya que configurarlos para todos es una tarea muy compleja.
+
+    * Solución: Configurar CORS para cada endpoint
+    ```c
+    // Configure CORS
+    u_map_put(response->map_header, "Access-Control-Allow-Origin", "*");
+    ```
+8. Problemas al interpretar el valor de la estructura **struct sysinfo** para obtener la información sobre la memoria. Los valores que maneja la estructura esta dado en **paginas** y para convertirlos a KB hay que multiplicarlo por 4 ya que cada pagina es un tamaño de 4KB. 
+    * Solución: Desplazar 2 bit a la izquierda o multiplicarlos por 4
+    ```c
+    //Memoria libre en KB
+    info[0] = mem_info.freeram << (PAGE_SHIFT - 10);
+    ```
+9. Tipo de dato incorrecto la crear el JSON para el response de la request en la api de c. En la función para crear un objeto JSON se debe indicar que tipo de dato se espera para convertirlo. Se cometió el error de indicar que se esperaba un dato de tipo float pero el dato era Integer, entonces al momento de convertirlo hubo un error de segmento de memoria porque el dato espera es mas grande que Integer.
+    * Solución: parsear el dato Integer a double para evitar el error de segmento
+    ```c
+    json = json_pack("{s:f, s:f, s:f, s:f}", "free", ((double)_info[0])/1024,
+         "used", ((double)_info[1])/1024, "cached", ((double)_info[2])/1024, "total", ((double)_info[3])/1024);
+    ``` 
