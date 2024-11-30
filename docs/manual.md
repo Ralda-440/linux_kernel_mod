@@ -1,11 +1,12 @@
-# Practica 1. Introducción al Kernel de Linux
+# Introducción al Kernel de Linux
 
-## Objetivos
-* Compilar e instalar el kernel de Linux
-* Realizar Modificaciones al Kernel de Linux
-* Implementar llamadas al sistema (syscalls) personalizadas
+* [Compilar e instalar el kernel de Linux](#compilar-e-instalar-el-kernel-de-linux)
+* [Modificaciones al Kernel de Linux](#modificaciones-al-kernel-de-linux)
+* [Implementar llamadas al sistema (syscalls) personalizadas](#implementar-llamadas-al-sistema-syscalls-personalizadas)
+* [Dashboard Web para el monitoreo del uso de memoria del Sistema Operativo](#dashboard-web-para-el-monitoreo-del-uso-de-memoria-del-sistema-operativo) 
+* [Problemas Encontrados](#problemas-encontrados)
 
-## Compilar el Kernel de Linux
+## Compilar e instalar el kernel de Linux
 
 Antes de realizar Modificaciones al kernel e implementar syscalls, es importante preparar el entorno donde se trabajara. Se instalaran herramientas para compilar el kernel y se descargara el kernel que servirá como base para las modificaciones e implementaciones del las syscalls.
 
@@ -167,7 +168,7 @@ Ya que podemos compilar nuestro kernel, ahora aprenderemos a modificarlos. Las m
 
 * ### Nombre del Kernel
 
-    Se modificara el nombre de nuestro Kernel.
+    Modificar el nombre de nuestro Kernel.
 
     Desde la raiz del codigo fuente abriremos el siguiente archivo
     ```bash
@@ -179,8 +180,8 @@ Ya que podemos compilar nuestro kernel, ahora aprenderemos a modificarlos. Las m
     ![Texto alternativo](./imagenes/mod2.png) 
 
 
-## Modificaciones al kernel de Linux
-Se explica como crear una nueva syscall e implementarla. También como usarla a nivel de usuario en un programa en lenguaje C. El procedimiento es el mismo para cualquier syscall, lo único que cambia es el código propio de la syscall. Teniendo eso en cuenta, se explicara detalladamente el proceso para la primera sycall y será el mismo para cualquiera.
+## Implementar llamadas al sistema (syscalls) personalizadas
+Ahora veremos como crear una nueva syscall e implementarla. También como usarla a nivel de usuario en un programa en lenguaje C. El procedimiento es el mismo para cualquier syscall, lo único que cambia es el código propio de la syscall. Teniendo eso en cuenta, se explicara detalladamente el proceso para la primera sycall y será el mismo para cualquiera.
 
 Ya que el objetivo es: implementar una syscall, no se explicara a fondo el código propio de la syscall. 
 
@@ -219,7 +220,7 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
         }
         ```
 
-        Se utiliza la funcion interna del kernel **"ktime_get_real_ts64"** para obtener la hora actual en segundos. Tambien un **struct** de tipo **timespec64** para guardarla y retornarla.
+        Se utiliza la funcion interna del kernel **"ktime_get_real_ts64"** para obtener la hora actual en segundos. Tambien un **struct** de tipo **timespec64** para guardarla y retornar **tv_sec**, que corresponde al tiempo en segundos.
 
     * #### Paso 3
         Crear un **Makefile** en el directorio actual.
@@ -450,7 +451,7 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
             ```
         2. División de fragmentos
 
-            Debido a que hasta tiempo de ejecucion se sabe en cuantos fragmentos se dividira la entrada, se utiliza un doble puntero char **, esto para crear en tiempo de ejecucion una lista de apuntadores y cada apuntador apunta a un fragmentos. La lectura del archivo input y calculo de los fragmentos se realiza con el siguientes codigo:
+            Debido a que hasta en tiempo de ejecucion se sabe en cuantos fragmentos se dividira la entrada, se utiliza un doble puntero **char \*\***, esto para crear en tiempo de ejecucion una lista de apuntadores y cada apuntador apunta a un fragmentos. La lectura del archivo input y calculo de los fragmentos se realiza con el siguientes codigo:
 
             ```c
             struct file *file_input;
@@ -535,11 +536,11 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
                 int size_key;
             };
             ```
-            Se utiliza la estructura completion definida por el kernel, que sirve para que el hilo principal espere a los demás hilos terminen su tarea. El hilo es el encargado de enviar una señal al hilo principal a través de la estructura completion.
+            Se utiliza la estructura **completion** definida por el kernel, que sirve para que el hilo principal espere a que los demás hilos terminen su tarea. El hilo es el encargado de enviar una señal al hilo principal a través de la estructura **completion**.
 
         5. Funcion para los hilos
 
-            Con la informacion de la estructura args_thread es bastante sencillo encriptar/desencriptar. 
+            Con la informacion de la estructura **args_thread** es bastante sencillo encriptar/desencriptar. 
             
             ```c
             int function_thread(void* arg) {
@@ -705,6 +706,23 @@ Ya que el objetivo es: implementar una syscall, no se explicara a fondo el códi
         }
     }
     ```  
+## Dashboard Web para el monitoreo del uso de memoria del Sistema Operativo
+
+El Dashboard Web está compuesto por cinco gráficas que muestran en tiempo real el uso de la memoria del sistema. Esta aplicación, desarrollada con **React**, consume una **API REST** construida en **C** utilizando el framework [**Ulfius HTTP**](https://github.com/babelouest/ulfius).
+
+Cada gráfica está asociada a un endpoint específico en la **API REST**. Estos **endpoints** interactúan con **syscalls** personalizadas, implementadas en el **kernel** del sistema, para obtener y procesar información detallada sobre el uso de la memoria.
+
+### Gráficas
+
+|Gráfica|Descripción|Endpoint|Syscalls|Representación Visual|
+|-|-|-|-|-|
+|Uso de Memoria Física (**gráfico de pie**)|Proporciona una descripción general de cómo se utiliza la memoria física, lo que facilita la comprensión de la distribución general de los recursos de memoria. La gráfica muestra: **memoria usada**, **memoria libre** y **memoria en caché**|Tipo **GET**. **/use_mem**|[Uso de Memoria](#syscalls-uso-de-memoria)|[Ver](/docs/imagenes/use_mem.png)|
+|Uso de Memoria a lo largo del tiempo (**gráfico de líneas**)|Mostrará cómo el uso de la memoria evoluciona con el tiempo, con líneas separadas para la memoria física y swap, lo que permite a los usuarios identificar picos en el uso de la memoria o períodos de presión de la memoria.|Tipo **GET**. **/use_swap**|- [Uso de Memoria](#syscalls-uso-de-memoria)<br>- [Swap](#syscalls-paginas-de-memoria-de-swap-usadas-y-libre)|- [Ver Imagen 1](/docs/imagenes/use_physical.png)<br>- [Ver Imagen 2](/docs/imagenes/use_swap.png)|
+|Fallos de páginas (**gráfico de barras**)|Muestra la cantidad de los fallos de página menores y fallos de página mayores|Tipo **GET**. **/fault_pages**|[Cantidad de Fallos de Páginas](#syscalls-cantidad-de-fallos-de-pagina)|- [Ver Imagen 1](/docs/imagenes/fault_major.png)<br>- [Ver Imagen 2](/docs/imagenes/fault_major.png)|
+|Páginas Activas e Inactivas (**gráfico de pie**)|Muestra las páginas de memoria activas e inactivas en el sistema. Proporciona una vista de cuánta memoria del sistema se utiliza activamente frente a la que está marcada como inactivo y potencialmente disponible|Tipo **GET**. **/use_pages**|[Páginas Activas e Inactivas](#syscalls-paginas-de-memoria-activas-e-inactivas)|[Ver](/docs/imagenes/pages_use.png)|
+|Top 5 Procesos con Mayor Uso de Memoria (**gráfico de barras**)|Muestra los 5 procesos que consumen más memoria, mostrando el nombre del proceso, el PID y el porcentaje del uso de memoria. Permite a los usuarios identificar qué procesos consumen más memoria, lo que ayuda a diagnosticar procesos fuera de control.|Tipo **GET**. **/use_mem_top_procs**|[Procesos que más memoria utilizan](#syscalls-procesos-que-más-memoria-utilizan)|[Ver](/docs/imagenes/top.png)|
+
+
 ## Problemas Encontrados
 1. Es importante que el nombre de nuestra syscall sea el mismo en todos los archivos en la que agregamos ya que si no fuera el mismo habrá errores de compilación.
     * Solución: siempre revisar con detenimiento si el nombre de nuestra funcion se encuentra bien escrito en todos los archivos.
